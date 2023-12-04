@@ -600,11 +600,16 @@ fn collect_non_default_code_offsets(
     }
 }
 
+fn count_uleb_bytes(size: usize) -> u32 {
+    return (usize::BITS - size.leading_zeros() + 6) / 7;
+}
+
 impl Emit for ModuleFunctions {
     fn emit(&self, cx: &mut EmitContext) {
         log::debug!("emit code section");
         let functions = used_local_functions(cx);
-        if functions.len() == 0 {
+        let functions_length = functions.len();
+        if functions_length == 0 {
             return;
         }
 
@@ -653,6 +658,7 @@ impl Emit for ModuleFunctions {
         }
         cx.wasm_module.section(&wasm_code_section);
 
+        let code_section_leb_bytes = count_uleb_bytes(functions_length) as usize;
         let code_section_start_offset =
             cx.wasm_module.as_slice().len() - wasm_code_section.byte_len();
         let mut cur_offset = code_section_start_offset;
@@ -675,8 +681,7 @@ impl Emit for ModuleFunctions {
             ));
         }
         cx.code_transform.function_ranges.sort_by_key(|i| i.0);
-        // FIXME: code section start in DWARF debug information expects 2 bytes before actual code section start.
-        cx.code_transform.code_section_start = code_section_start_offset - 2;
+        cx.code_transform.code_section_start = code_section_start_offset - code_section_leb_bytes;
         cx.code_transform.instruction_map = instruction_map.into_iter().collect();
     }
 }
@@ -851,5 +856,13 @@ mod tests {
             matches!(module.funcs.get(new_fn_id).kind, FunctionKind::Local(_)),
             "new local function has the right kind"
         );
+    }
+
+    #[test]
+    fn count_uleb_bytes() {
+        assert_eq!(super::count_uleb_bytes(0), 0);
+        assert_eq!(super::count_uleb_bytes(1), 1);
+        assert_eq!(super::count_uleb_bytes(127), 1);
+        assert_eq!(super::count_uleb_bytes(128), 2);
     }
 }
